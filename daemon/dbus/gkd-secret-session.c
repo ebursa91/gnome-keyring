@@ -183,7 +183,12 @@ aes_negotiate (GkdSecretSession *self,
 	gboolean ret;
 
 	session = gkd_secret_service_get_pkcs11_session (self->service, self->caller);
-	g_return_val_if_fail (session, FALSE);
+	if (session == NULL) {
+		g_set_error_literal (error_out, G_DBUS_ERROR,
+				     G_DBUS_ERROR_FAILED,
+				     "Couldn't open a session for this caller.");
+		return FALSE;
+	}
 
 	if (!aes_create_dh_keys (session, "ietf-ike-grp-modp-1024", &pub, &priv)) {
 		g_set_error_literal (error_out, G_DBUS_ERROR,
@@ -250,7 +255,12 @@ plain_negotiate (GkdSecretSession *self,
 	GckSession *session;
 
 	session = gkd_secret_service_get_pkcs11_session (self->service, self->caller);
-	g_return_val_if_fail (session, FALSE);
+	if (session == NULL) {
+		g_set_error_literal (error_out, G_DBUS_ERROR,
+				     G_DBUS_ERROR_FAILED,
+				     "Couldn't open a session for this caller.");
+		return FALSE;
+	}
 
 	gck_builder_add_ulong (&builder, CKA_CLASS, CKO_SECRET_KEY);
 	gck_builder_add_ulong (&builder, CKA_KEY_TYPE, CKK_G_NULL);
