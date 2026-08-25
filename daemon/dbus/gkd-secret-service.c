@@ -1295,7 +1295,16 @@ gkd_secret_service_get_pkcs11_session (GkdSecretService *self, const gchar *call
 	g_return_val_if_fail (caller, NULL);
 
 	client = g_hash_table_lookup (self->clients, caller);
-	g_return_val_if_fail (client, NULL);
+	if (client == NULL) {
+		/* The record is normally created by a high priority idle queued from
+		 * the message filter, but that idle is not ordered against the method
+		 * call that queued it: a peer which connects and calls straight away
+		 * can reach us first. Create it here instead of failing the call --
+		 * it is a hash table insert, not I/O. */
+		gkd_secret_service_ensure_client (self, caller);
+		client = g_hash_table_lookup (self->clients, caller);
+		g_return_val_if_fail (client, NULL);
+	}
 
 	/* Open a new session if necessary */
 	if (!client->pkcs11_session) {
@@ -1430,6 +1439,10 @@ gkd_secret_service_publish_dispatch (GkdSecretService *self, const gchar *caller
 
 	/* Take ownership of the session */
 	client = g_hash_table_lookup (self->clients, caller);
+	if (client == NULL) {
+		gkd_secret_service_ensure_client (self, caller);
+		client = g_hash_table_lookup (self->clients, caller);
+	}
 	g_return_if_fail (client);
 	path = gkd_secret_dispatch_get_object_path (object);
 	g_return_if_fail (!g_hash_table_lookup (client->dispatch, path));
