@@ -320,6 +320,10 @@ gkd_secret_service_ensure_client (GkdSecretService *self,
 {
 	ServiceClient *client;
 
+	/* Registration idles queued by the message filter may outlive dispose. */
+	if (self->connection == NULL)
+		return;
+
 	client = g_hash_table_lookup (self->clients, caller);
 	if (client == NULL) {
 		initialize_service_client (self, caller);

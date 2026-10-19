@@ -8,6 +8,7 @@ missing-client registration race and prevents failed negotiation from becoming a
 NULL success reply that aborts the daemon. The follow-up watches initial name
 ownership as well as future disconnects, releasing state if a queued request
 recreates a client after its disconnect notification was already processed.
+Queued registration also stops once service disposal clears the connection.
 
 Upstream patch:
 https://gitlab.gnome.org/GNOME/gnome-keyring/-/merge_requests/112
@@ -59,7 +60,7 @@ any other archive. Keep the original package and signature for rollback.
 Installation and rollback
 -------------------------
 
-Install the generated gnome-keyring-1:51.1-1.1-x86_64.pkg.tar.zst with pacman -U.
+Install the generated gnome-keyring-1:51.1-1.2-x86_64.pkg.tar.zst with pacman -U.
 This covers systemd, D-Bus and PAM because the existing /usr/bin path is retained.
 Installing the package does not itself restart the running user daemon. A normal
 logout/login activates the new binary; an explicit service restart activates it

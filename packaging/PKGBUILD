@@ -2,7 +2,7 @@
 # Keep every other file from the verified Arch 51.1-1 package unchanged.
 pkgname=gnome-keyring
 pkgver=51.1
-pkgrel=1.1
+pkgrel=1.2
 epoch=1
 pkgdesc='Stores passwords and encryption keys (local OpenSession race backport)'
 arch=(x86_64)

@@ -44,6 +44,14 @@ This functional test additionally checks the plain-session reply and `Close`.
 
 ## Disconnected-client lifecycle
 
+The Meson target `dbus-client-lifecycle` uses a private bus, a mock PKCS#11 token
+and temporary directories. It checks normal disconnect cleanup, registration
+after a peer's disconnect was processed, and disposal with ownership lookups
+pending. Weak session references verify dispatch-object destruction. It needs no
+GDB or ptrace and does not add production test APIs.
+
+The larger standalone stress check is available separately:
+
 ```sh
 python3 validation/run-client-lifecycle.py \
   --daemon /absolute/path/to/symbolized/gnome-keyring-daemon
