@@ -143,6 +143,7 @@ struct _GkdSecretService {
 
 typedef struct _ServiceClient {
 	gchar *caller_peer;
+	guint watch_id;
 	CK_G_APPLICATION app;
 	GckSession *pkcs11_session;
 	GHashTable *dispatch;
@@ -254,6 +255,9 @@ free_client (gpointer data)
 	if (!client)
 		return;
 
+	if (client->watch_id)
+		g_bus_unwatch_name (client->watch_id);
+
 	/* Info about our client */
 	g_free (client->caller_peer);
 
@@ -272,6 +276,16 @@ free_client (gpointer data)
 }
 
 static void
+on_client_vanished (GDBusConnection *connection,
+		    const gchar *name,
+		    gpointer user_data)
+{
+	GkdSecretService *self = user_data;
+
+	g_hash_table_remove (self->clients, name);
+}
+
+static void
 initialize_service_client (GkdSecretService *self,
 			   const gchar *caller)
 {
@@ -287,6 +301,14 @@ initialize_service_client (GkdSecretService *self,
 	client->dispatch = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, dispose_and_unref);
 
 	g_hash_table_replace (self->clients, client->caller_peer, client);
+
+	/* A queued call may recreate a client after its disconnect notification.
+	 * Check initial ownership as well as watching for future disconnects.
+	 */
+	client->watch_id = g_bus_watch_name_on_connection (self->connection, caller,
+							G_BUS_NAME_WATCHER_FLAGS_NONE,
+							NULL, on_client_vanished,
+							self, NULL);
 
 	/* Update default collection each time someone connects */
 	update_default (self);
@@ -1299,8 +1321,8 @@ gkd_secret_service_get_pkcs11_session (GkdSecretService *self, const gchar *call
 		/* The record is normally created by a high priority idle queued from
 		 * the message filter, but that idle is not ordered against the method
 		 * call that queued it: a peer which connects and calls straight away
-		 * can reach us first. Create it here instead of failing the call --
-		 * it is a hash table insert, not I/O. */
+		 * can reach us first. Use the normal initialization here if the
+		 * deferred registration has not run yet. */
 		gkd_secret_service_ensure_client (self, caller);
 		client = g_hash_table_lookup (self->clients, caller);
 		g_return_val_if_fail (client, NULL);
