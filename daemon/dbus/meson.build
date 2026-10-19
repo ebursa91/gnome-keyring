@@ -153,3 +153,15 @@ foreach test_name : libgkd_dbus_tests
     suite: 'gkr-daemon-dbus',
   )
 endforeach
+
+client_lifecycle = executable('dbus-client-lifecycle',
+  'test-dbus-client-lifecycle.c',
+  '../gkd-util.c',
+  '../login/gkd-login-context.c',
+  dependencies: [libgkd_dbus_tests_deps, libgkm_dep, libgcrypt_dep],
+  include_directories: config_h_inc,
+)
+
+test('dbus-client-lifecycle', client_lifecycle,
+  suite: 'gkr-daemon-dbus',
+)

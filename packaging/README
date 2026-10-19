@@ -1,0 +1,77 @@
+GNOME Keyring 51.1 OpenSession hotfix
+==================================
+
+The source branch backports the two original commits from GNOME merge request
+!112 onto release 51.1, plus a local disconnected-client cleanup follow-up.
+The original patch is proposed upstream, not merged or approved. It repairs the
+missing-client registration race and prevents failed negotiation from becoming a
+NULL success reply that aborts the daemon. The follow-up watches initial name
+ownership as well as future disconnects, releasing state if a queued request
+recreates a client after its disconnect notification was already processed.
+Queued registration also stops once service disposal clears the connection.
+
+Upstream patch:
+https://gitlab.gnome.org/GNOME/gnome-keyring/-/merge_requests/112
+Matching client report:
+https://github.com/openai/codex/issues/51694
+
+This local PKGBUILD replaces ONLY /usr/bin/gnome-keyring-daemon. All other
+payload files, service units, D-Bus activation files, PAM modules and package
+install hooks come unchanged from the SHA-256-pinned Arch 1:51.1-1 package.
+It generates fresh package metadata and mtree using makepkg. The replacement
+daemon includes its debug symbols for subsequent diagnosis.
+
+Build and validate
+------------------
+
+Use Meson, Ninja, GLib development tools and the normal Arch build dependencies.
+No credentials, collection data or settings belong in this checkout.
+
+  (
+    source /etc/makepkg.conf
+    export CFLAGS="$CFLAGS ${DEBUG_CFLAGS:--g}"
+    export LDFLAGS
+    meson setup .git/build-hardened --prefix=/usr --libdir=lib --libexecdir=lib \
+      --sbindir=bin --buildtype=plain --wrap-mode=nodownload \
+      -Dselinux=disabled -Dmanpage=false -Db_pie=true -Db_lto=true
+    meson compile -C .git/build-hardened
+  )
+
+Building outside makepkg requires explicitly passing its compiler/linker flags.
+The package recipe rejects a daemon missing PIE, BIND_NOW, stack protection or
+fortified libc calls. Do not replace this build with an unhardened debug build.
+
+Run the full Meson suite on a private D-Bus and a throwaway HOME/XDG environment;
+the suite's daemon fixtures use temporary keyrings. Do not suppress test failures.
+See validation/README.md for the standalone OpenSession concurrency regression,
+which creates its own private bus with activation disabled.
+
+After the build and validation pass, stage the installation into the checkout:
+
+  meson install -C .git/build-hardened --destdir "$PWD/.git/stage"
+  cd packaging
+  makepkg --force
+
+The original package is read from /var/cache/pacman/pkg by default. Override
+GNOME_KEYRING_STOCK_PACKAGE to point at another copy of that EXACT archive.
+Verify its detached Arch signature before building. The pinned checksum rejects
+any other archive. Keep the original package and signature for rollback.
+
+Installation and rollback
+-------------------------
+
+Install the generated gnome-keyring-1:51.1-1.2-x86_64.pkg.tar.zst with pacman -U.
+This covers systemd, D-Bus and PAM because the existing /usr/bin path is retained.
+Installing the package does not itself restart the running user daemon. A normal
+logout/login activates the new binary; an explicit service restart activates it
+immediately but discards session-only secrets and may require reauthentication.
+Persistent keyring files are not modified by the package.
+
+Rollback: install the original signed 1:51.1-1 archive with pacman -U, then use
+the same deliberate restart/logout policy. No configuration override needs to be
+removed. A later official package with a higher pkgrel/version replaces this
+local package normally; it can reintroduce the defect if it lacks the patch.
+Do not pin or block future security updates.
+
+The original merge request remains the upstream contribution. Any GitHub PR for
+this branch is a personal review/backport record, not a second upstream fix.

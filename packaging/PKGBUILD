@@ -1,0 +1,42 @@
+# Local daemon-only backport of GNOME Keyring merge request !112.
+# Keep every other file from the verified Arch 51.1-1 package unchanged.
+pkgname=gnome-keyring
+pkgver=51.1
+pkgrel=1.2
+epoch=1
+pkgdesc='Stores passwords and encryption keys (local OpenSession race backport)'
+arch=(x86_64)
+url='https://gitlab.gnome.org/GNOME/gnome-keyring/-/merge_requests/112'
+license=(GPL-2.0-or-later LGPL-2.1-or-later)
+depends=(dconf gcr gcr-4 glib2 glibc libcap-ng libgcc libgcrypt pam systemd-libs)
+provides=(org.freedesktop.secrets)
+groups=(gnome)
+options=('!strip' '!debug' '!lto')
+install=gnome-keyring.install
+
+_stock_package=${GNOME_KEYRING_STOCK_PACKAGE:-/var/cache/pacman/pkg/gnome-keyring-1:51.1-1-x86_64.pkg.tar.zst}
+source=("stock.pkg.tar.zst::file://${_stock_package}")
+noextract=(stock.pkg.tar.zst)
+sha256sums=('8e6dc27e40ebadae6569098dff9fffcad4ca9f67c211951f80a17c01485b4de4')
+
+package() {
+  local staged_daemon="$startdir/../.git/stage/usr/bin/gnome-keyring-daemon"
+  if [[ ! -x "$staged_daemon" ]]; then
+    error 'Stage the tested build with meson install --destdir .git/stage first.'
+    return 1
+  fi
+  local elf_dynamic elf_symbols
+  elf_dynamic=$(LC_ALL=C readelf -d "$staged_daemon")
+  elf_symbols=$(LC_ALL=C readelf -W --dyn-syms "$staged_daemon")
+  if [[ "$elf_dynamic" != *BIND_NOW* || "$elf_dynamic" != *PIE* ||
+        "$elf_symbols" != *__stack_chk_fail* ||
+        ! "$elf_symbols" =~ [[:space:]]__[^[:space:]]+_chk(@|$) ]]; then
+    error 'The replacement daemon must retain Arch PIE, BIND_NOW, stack protection and fortified calls.'
+    return 1
+  fi
+
+  bsdtar --no-same-owner \
+    --exclude .PKGINFO --exclude .BUILDINFO --exclude .MTREE --exclude .INSTALL \
+    -xf "$srcdir/stock.pkg.tar.zst" -C "$pkgdir"
+  install -m755 "$staged_daemon" "$pkgdir/usr/bin/gnome-keyring-daemon"
+}

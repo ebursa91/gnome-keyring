@@ -143,6 +143,7 @@ struct _GkdSecretService {
 
 typedef struct _ServiceClient {
 	gchar *caller_peer;
+	guint watch_id;
 	CK_G_APPLICATION app;
 	GckSession *pkcs11_session;
 	GHashTable *dispatch;
@@ -254,6 +255,9 @@ free_client (gpointer data)
 	if (!client)
 		return;
 
+	if (client->watch_id)
+		g_bus_unwatch_name (client->watch_id);
+
 	/* Info about our client */
 	g_free (client->caller_peer);
 
@@ -269,6 +273,16 @@ free_client (gpointer data)
 	g_hash_table_destroy (client->dispatch);
 
 	g_free (client);
+}
+
+static void
+on_client_vanished (GDBusConnection *connection,
+		    const gchar *name,
+		    gpointer user_data)
+{
+	GkdSecretService *self = user_data;
+
+	g_hash_table_remove (self->clients, name);
 }
 
 static void
@@ -288,6 +302,14 @@ initialize_service_client (GkdSecretService *self,
 
 	g_hash_table_replace (self->clients, client->caller_peer, client);
 
+	/* A queued call may recreate a client after its disconnect notification.
+	 * Check initial ownership as well as watching for future disconnects.
+	 */
+	client->watch_id = g_bus_watch_name_on_connection (self->connection, caller,
+							G_BUS_NAME_WATCHER_FLAGS_NONE,
+							NULL, on_client_vanished,
+							self, NULL);
+
 	/* Update default collection each time someone connects */
 	update_default (self);
 }
@@ -297,6 +319,10 @@ gkd_secret_service_ensure_client (GkdSecretService *self,
 				  const gchar *caller)
 {
 	ServiceClient *client;
+
+	/* Registration idles queued by the message filter may outlive dispose. */
+	if (self->connection == NULL)
+		return;
 
 	client = g_hash_table_lookup (self->clients, caller);
 	if (client == NULL) {
@@ -424,18 +450,30 @@ service_method_open_session (GkdExportedService *skeleton,
 	GError *error = NULL;
 	const gchar *caller;
 	GVariant *input_payload;
+	gboolean opened;
 
 	caller = g_dbus_method_invocation_get_sender (invocation);
 
 	/* Now we can create a session with this information */
 	session = gkd_secret_session_new (self, caller);
 	input_payload = g_variant_get_variant (input);
-	gkd_secret_session_handle_open (session, algorithm, input_payload,
-					&output, &result,
-					&error);
+	opened = gkd_secret_session_handle_open (session, algorithm, input_payload,
+						 &output, &result,
+						 &error);
 	g_variant_unref (input_payload);
 
-	if (error != NULL) {
+	/* Branch on the return value, not on the error alone: a negotiate helper
+	 * that bails out through g_return_val_if_fail() reports failure without
+	 * ever setting one, and completing the call with a NULL body makes
+	 * g_variant_new() abort the whole daemon. */
+	if (!opened || output == NULL || result == NULL) {
+		if (error == NULL)
+			g_set_error_literal (&error, G_DBUS_ERROR,
+					     G_DBUS_ERROR_FAILED,
+					     "Couldn't open a session for this caller.");
+		if (output != NULL)
+			g_variant_unref (g_variant_ref_sink (output));
+		g_free (result);
 		g_dbus_method_invocation_take_error (invocation, error);
 	} else {
 		gkd_secret_service_publish_dispatch (self, caller,
@@ -1283,7 +1321,16 @@ gkd_secret_service_get_pkcs11_session (GkdSecretService *self, const gchar *call
 	g_return_val_if_fail (caller, NULL);
 
 	client = g_hash_table_lookup (self->clients, caller);
-	g_return_val_if_fail (client, NULL);
+	if (client == NULL) {
+		/* The record is normally created by a high priority idle queued from
+		 * the message filter, but that idle is not ordered against the method
+		 * call that queued it: a peer which connects and calls straight away
+		 * can reach us first. Use the normal initialization here if the
+		 * deferred registration has not run yet. */
+		gkd_secret_service_ensure_client (self, caller);
+		client = g_hash_table_lookup (self->clients, caller);
+		g_return_val_if_fail (client, NULL);
+	}
 
 	/* Open a new session if necessary */
 	if (!client->pkcs11_session) {
@@ -1418,6 +1465,10 @@ gkd_secret_service_publish_dispatch (GkdSecretService *self, const gchar *caller
 
 	/* Take ownership of the session */
 	client = g_hash_table_lookup (self->clients, caller);
+	if (client == NULL) {
+		gkd_secret_service_ensure_client (self, caller);
+		client = g_hash_table_lookup (self->clients, caller);
+	}
 	g_return_if_fail (client);
 	path = gkd_secret_dispatch_get_object_path (object);
 	g_return_if_fail (!g_hash_table_lookup (client->dispatch, path));
